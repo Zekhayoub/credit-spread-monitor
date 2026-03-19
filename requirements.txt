@@ -1,0 +1,13 @@
+pandas>=2.2
+numpy>=1.26
+fredapi>=0.5
+python-dotenv>=1.0
+pyyaml>=6.0
+hmmlearn>=0.3
+scikit-learn>=1.4
+scipy>=1.12
+matplotlib>=3.8
+seaborn>=0.13
+openpyxl>=3.1
+ipykernel>=6.29
+joblib>=1.3
