@@ -22,48 +22,61 @@ def fetch_fred_series(
     series_code: str,
     series_name: str,
     start_date: str,
+    max_retries: int = 3,
 ) -> pd.Series:
     """
-    Fetch a single series from the FRED API.
+    Fetch a single series from the FRED API with retry logic.
 
     Args:
         fred: Authenticated Fred client.
-        series_code: FRED series identifier (e.g., "BAMLC0A4CBBB").
-        series_name: Human-readable name for logging (e.g., "bbb_spread").
+        series_code: FRED series identifier.
+        series_name: Human-readable name for logging.
         start_date: Start date in YYYY-MM-DD format.
+        max_retries: Number of retry attempts on failure.
 
     Returns:
-        pd.Series with DatetimeIndex and float values.
+        pd.Series with DatetimeIndex.
 
     Raises:
-        ValueError: If the fetched series is empty.
+        ValueError: If the fetched series is empty after all retries.
     """
-    logger.info("Fetching %s (%s) from %s...", series_name, series_code, start_date)
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(
+                "Fetching %s (%s)... [attempt %d/%d]",
+                series_name, series_code, attempt, max_retries,
+            )
 
-    try:
-        series = fred.get_series(series_code, observation_start=start_date)
-    except Exception as e:
-        logger.error("Failed to fetch %s (%s): %s", series_name, series_code, e)
-        raise
+            series = fred.get_series(series_code, observation_start=start_date)
 
-    if series is None or series.empty:
-        raise ValueError(f"Empty series returned for {series_name} ({series_code})")
+            if series is None or series.empty:
+                raise ValueError(f"Empty series for {series_name} ({series_code})")
 
-    series.name = series_name
-    series.index.name = "date"
-    series.index = pd.to_datetime(series.index)
+            series.name = series_name
+            series.index.name = "date"
+            series.index = pd.to_datetime(series.index)
 
-    n_obs = series.dropna().shape[0]
-    logger.info(
-        "  -> %d observations, %s to %s",
-        n_obs,
-        series.dropna().index.min().date(),
-        series.dropna().index.max().date(),
-    )
+            n_obs = series.dropna().shape[0]
+            logger.info(
+                "  -> %d observations, %s to %s",
+                n_obs,
+                series.dropna().index.min().date(),
+                series.dropna().index.max().date(),
+            )
 
-    return series
+            return series
 
-
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 2 ** (attempt - 1)
+                logger.warning(
+                    "  Attempt %d failed: %s. Retrying in %ds...",
+                    attempt, e, wait,
+                )
+                time.sleep(wait)
+            else:
+                logger.error("  All %d attempts failed for %s", max_retries, series_name)
+                raise
 
 def fetch_all_series(config: dict = CONFIG) -> pd.DataFrame:
     """
@@ -207,3 +220,8 @@ def clean_master(df: pd.DataFrame, config: dict = CONFIG) -> tuple[pd.DataFrame,
     )
 
     return df, trading_mask
+
+
+
+
+
