@@ -7,6 +7,7 @@ fred:
     treasury_10y: "DGS10"        # 10-Year Treasury Yield
     treasury_5y: "DGS5"           # 5-Year Treasury, closer to IG duration
     vix: "VIXCLS"                # CBOE Volatility Index
+    move: "BAMLMOVE"               # ICE BofA MOVE Index (Treasury vol, controls OAS)
   start_date: "2000-01-01"
 
 paths:
