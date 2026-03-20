@@ -6,9 +6,13 @@ Handles caching, cleaning, and alignment of daily time series.
 """
 
 import logging
+import time
+from pathlib import Path
 
 import pandas as pd
 from fredapi import Fred
+
+from src.config import CONFIG, PROJECT_ROOT, get_fred_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -58,3 +62,40 @@ def fetch_fred_series(
     )
 
     return series
+
+
+
+def fetch_all_series(config: dict = CONFIG) -> pd.DataFrame:
+    """
+    Fetch all FRED series defined in config and assemble into a DataFrame.
+
+    Args:
+        config: Configuration dict (uses config["fred"] section).
+
+    Returns:
+        pd.DataFrame with DatetimeIndex, one column per series.
+        Contains NaN for weekends/holidays (not yet cleaned).
+    """
+    api_key = get_fred_api_key()
+    fred = Fred(api_key=api_key)
+
+    series_map = config["fred"]["series"]
+    start_date = config["fred"]["start_date"]
+
+    all_series = {}
+    for name, code in series_map.items():
+        series = fetch_fred_series(fred, code, name, start_date)
+        all_series[name] = series
+        time.sleep(0.5)  # respect FRED rate limits (120 req/min)
+
+    df = pd.concat(all_series.values(), axis=1)
+    df.index.name = "date"
+    df = df.sort_index()
+
+    logger.info(
+        "Assembled master DataFrame: %d rows x %d columns, %s to %s",
+        len(df), len(df.columns),
+        df.index.min().date(), df.index.max().date(),
+    )
+
+    return df
