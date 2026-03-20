@@ -99,3 +99,50 @@ def fetch_all_series(config: dict = CONFIG) -> pd.DataFrame:
     )
 
     return df
+
+
+def save_raw_series(df: pd.DataFrame, config: dict = CONFIG) -> None:
+    """Save each column as an individual CSV in data/raw/."""
+    raw_dir = PROJECT_ROOT / config["paths"]["raw"]
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    for col in df.columns:
+        path = raw_dir / f"{col}.csv"
+        df[[col]].dropna().to_csv(path)
+        logger.info("Saved raw series: %s", path)
+
+
+def save_master(df: pd.DataFrame, config: dict = CONFIG) -> Path:
+    """Save the master DataFrame to data/processed/master.csv."""
+    proc_dir = PROJECT_ROOT / config["paths"]["processed"]
+    proc_dir.mkdir(parents=True, exist_ok=True)
+
+    path = proc_dir / "master.csv"
+    df.to_csv(path)
+    logger.info("Saved master DataFrame: %s (%d rows)", path, len(df))
+
+    return path
+
+
+def load_master_if_cached(config: dict = CONFIG) -> pd.DataFrame | None:
+    """
+    Load master.csv from cache if it exists and was created today.
+
+    Returns:
+        pd.DataFrame if cache is fresh, None otherwise.
+    """
+    from datetime import datetime
+
+    path = PROJECT_ROOT / config["paths"]["processed"] / "master.csv"
+
+    if not path.exists():
+        return None
+
+    modified = datetime.fromtimestamp(path.stat().st_mtime)
+    if modified.date() != datetime.today().date():
+        logger.info("Cache exists but is stale (%s). Re-fetching.", modified.date())
+        return None
+
+    logger.info("Loading from cache: %s", path)
+    df = pd.read_csv(path, index_col=0, parse_dates=True)
+    return df
