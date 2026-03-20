@@ -224,4 +224,62 @@ def clean_master(df: pd.DataFrame, config: dict = CONFIG) -> tuple[pd.DataFrame,
 
 
 
+def run_ingestion(config: dict = CONFIG) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Main entry point for the ingestion module.
 
+    Steps:
+        1. Check cache
+        2. Fetch all series (or load from cache)
+        3. Save raw series
+        4. Clean and align
+        5. Save master + trading_mask
+
+    Returns:
+        Tuple of (master DataFrame, trading_mask DataFrame).
+    """
+    # Check cache
+    cached = load_master_if_cached(config)
+    if cached is not None:
+        mask_path = PROJECT_ROOT / config["paths"]["processed"] / "trading_mask.csv"
+        if mask_path.exists():
+            trading_mask = pd.read_csv(mask_path, index_col=0, parse_dates=True)
+            return cached, trading_mask
+
+    # Fetch
+    df_raw = fetch_all_series(config)
+
+    # Save raw
+    save_raw_series(df_raw, config)
+
+    # Clean
+    df_clean, trading_mask = clean_master(df_raw, config)
+
+    # Save
+    save_master(df_clean, config)
+
+    # Save trading mask
+    mask_path = PROJECT_ROOT / config["paths"]["processed"] / "trading_mask.csv"
+    trading_mask.to_csv(mask_path)
+    logger.info("Saved trading mask: %s", mask_path)
+
+    return df_clean, trading_mask
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    )
+    df, mask = run_ingestion()
+    print(f"\nMaster DataFrame: {df.shape[0]} rows x {df.shape[1]} columns")
+    print(f"Date range: {df.index.min().date()} to {df.index.max().date()}")
+    print(f"Columns: {list(df.columns)}")
+    print(f"\nTrading mask shape: {mask.shape}")
+    print(f"Real trading days per series:\n{mask.sum()}")
+
+
+
+
+
+    
