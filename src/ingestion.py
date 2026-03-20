@@ -146,3 +146,64 @@ def load_master_if_cached(config: dict = CONFIG) -> pd.DataFrame | None:
     logger.info("Loading from cache: %s", path)
     df = pd.read_csv(path, index_col=0, parse_dates=True)
     return df
+
+
+def clean_master(df: pd.DataFrame, config: dict = CONFIG) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Clean the raw master DataFrame.
+
+    Steps:
+        1. Save a trading_mask (True where data was originally observed)
+        2. Forward-fill NaN (standard for daily financial series)
+        3. Drop rows where ALL columns are NaN
+        4. Run quality assertions
+
+    Args:
+        df: Raw DataFrame with NaN on weekends/holidays.
+
+    Returns:
+        Tuple of (cleaned DataFrame, trading_mask DataFrame).
+        The trading_mask has the same shape as the cleaned DataFrame,
+        with True for real trading days and False for forward-filled days.
+        Save this mask — it's needed for correct volatility calculation.
+    """
+    logger.info("Cleaning master DataFrame...")
+    logger.info("  NaN before cleaning:\n%s", df.isna().sum().to_string())
+
+    # 1. Save trading mask BEFORE forward-fill
+    trading_mask = df.notna()
+
+    # 2. Forward-fill (max 5 days to avoid filling across long gaps)
+    df = df.ffill(limit=5)
+
+    # 3. Drop rows where everything is still NaN
+    rows_before = len(df)
+    df = df.dropna(how="all")
+    rows_dropped = rows_before - len(df)
+    if rows_dropped > 0:
+        logger.info("  Dropped %d all-NaN rows", rows_dropped)
+
+    # 4. Drop any remaining rows with NaN (start of series misalignment)
+    df = df.dropna()
+
+    # Align trading_mask to cleaned index
+    trading_mask = trading_mask.loc[df.index]
+
+    # 5. Quality assertions
+    assert df.isna().sum().sum() == 0, "NaN remaining after cleaning"
+    assert len(df) > 1000, f"Only {len(df)} rows — expected 5000+"
+
+    # Check for negative spreads (would indicate data corruption)
+    spread_cols = [c for c in df.columns if "spread" in c]
+    for col in spread_cols:
+        n_neg = (df[col] < 0).sum()
+        if n_neg > 0:
+            logger.warning("  %s has %d negative values — check data quality", col, n_neg)
+
+    logger.info(
+        "  Cleaned: %d rows x %d columns, %s to %s",
+        len(df), len(df.columns),
+        df.index.min().date(), df.index.max().date(),
+    )
+
+    return df, trading_mask
