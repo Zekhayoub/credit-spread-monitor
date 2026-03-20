@@ -218,10 +218,38 @@ def clean_master(df: pd.DataFrame, config: dict = CONFIG) -> tuple[pd.DataFrame,
         len(df), len(df.columns),
         df.index.min().date(), df.index.max().date(),
     )
+    
+    validate_ranges(df)
 
     return df, trading_mask
 
+def validate_ranges(df: pd.DataFrame) -> None:
+    """
+    Sanity check: verify that values fall within expected ranges.
+    Logs warnings for out-of-range values (does not raise).
+    """
+    expected_ranges = {
+        "aaa_spread": (0, 5),
+        "aa_spread": (0, 5),
+        "bbb_spread": (0, 10),
+        "hy_spread": (0, 25),
+        "treasury_10y": (-1, 20),
+        "treasury_5y": (-1, 20),
+        "vix": (0, 100),
+        "move": (0, 300),
+    }
 
+    for col, (low, high) in expected_ranges.items():
+        if col not in df.columns:
+            continue
+        n_below = (df[col] < low).sum()
+        n_above = (df[col] > high).sum()
+        if n_below > 0:
+            logger.warning("%s: %d values below %s", col, n_below, low)
+        if n_above > 0:
+            logger.warning("%s: %d values above %s", col, n_above, high)
+
+    logger.info("Range validation complete")
 
 
 def run_ingestion(config: dict = CONFIG) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -282,4 +310,4 @@ if __name__ == "__main__":
 
 
 
-    
+
