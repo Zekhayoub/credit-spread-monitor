@@ -1,0 +1,67 @@
+fred:
+  series:
+    aaa_spread: "BAMLC0A1CAAA"   # ICE BofA AAA US Corporate OAS
+    aa_spread: "BAMLC0A2CAA"     # ICE BofA AA US Corporate OAS
+    bbb_spread: "BAMLC0A4CBBB"   # ICE BofA BBB US Corporate OAS
+    hy_spread: "BAMLH0A0HYM2"    # ICE BofA US High Yield OAS
+    treasury_10y: "DGS10"        # 10-Year Treasury Yield
+    vix: "VIXCLS"                # CBOE Volatility Index
+  start_date: "2000-01-01"
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"
+  figures: "figures"
+  results: "results"
+  models: "models"
+
+features:
+  zscore_windows: [60, 252]
+  percentile_windows: [252]
+  volatility_windows: [20, 60]
+  change_windows: [1, 5, 20]
+
+regime:
+  n_states_range: [2, 3, 4, 5]
+  n_states_default: 3
+  n_iter: 200
+  n_init: 50
+  covariance_type: "full"
+  random_state: 42
+  input_features:
+    - "bbb_spread_change_1d"
+    - "hy_spread_change_1d"
+    - "bbb_rolling_vol_20d"
+    - "bbb_hy_ratio_change_1d"
+
+stress:
+  vix_thresholds: [25, 30, 35]
+  hy_widening_20d: 1.0
+  yield_rise_20d: 0.5
+  forward_windows: [5, 10, 20, 60]
+  cooldown_days: 20
+  min_episodes: 5
+
+# Crisis periods — used ONLY for visual overlay in EDA charts.
+# These are NOT inputs to the HMM or any model.
+# They serve as a sanity check to verify that detected regimes
+# align with known market events.
+crisis_periods:
+  - name: "GFC"
+    start: "2007-07-01"
+    end: "2009-03-31"
+  - name: "Euro Debt Crisis"
+    start: "2011-07-01"
+    end: "2012-07-31"
+  - name: "Oil Crash"
+    start: "2015-08-01"
+    end: "2016-02-29"
+  - name: "COVID-19"
+    start: "2020-02-15"
+    end: "2020-06-30"
+  - name: "2022 Rate Shock"
+    start: "2022-01-01"
+    end: "2022-10-31"
+
+report:
+  output_filename: "credit_spread_report.xlsx"
