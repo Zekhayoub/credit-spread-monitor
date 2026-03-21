@@ -36,3 +36,11 @@ def compute_zscore(series,window,min_std):
 
 
 
+def compute_percentile( series, window):
+
+    # Vectorized, uses compiled C under the hood
+    # faster than .rolling().apply(lambda x: ...)
+    pctile = series.rolling(window, min_periods=window // 2).rank() / window
+
+    return pctile
+
