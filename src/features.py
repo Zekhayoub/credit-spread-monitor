@@ -60,4 +60,25 @@ def compute_rolling_volatility( spread_changes, window, trading_mask ):
     return vol
 
 
+def compute_compression_ratio(df ):
 
+    result = pd.DataFrame(index=df.index)
+
+    if "bbb_spread" in df.columns and "hy_spread" in df.columns:
+        result["ig_hy_ratio"] = np.where(
+            df["hy_spread"] != 0,
+            df["bbb_spread"] / df["hy_spread"],
+            np.nan,
+        )
+        result["ig_hy_ratio_change_1d"] = pd.Series(
+            result["ig_hy_ratio"]
+        ).diff(1)
+
+    if "aa_spread" in df.columns and "bbb_spread" in df.columns:
+        result["aa_bbb_ratio"] = np.where(
+            df["bbb_spread"] != 0,
+            df["aa_spread"] / df["bbb_spread"],
+            np.nan,
+        )
+
+    return result
