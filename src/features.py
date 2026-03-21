@@ -21,13 +21,18 @@ def compute_spread_changes(df,spread_col,windows):
     return result
 
 
-def compute_zscore(series,window):
+def compute_zscore(series,window,min_std):
     
-    rolling_mean = series.rolling( window , min_periods = window // 2 ).mean()
-    rolling_std = series.rolling( window , min_periods = window // 2 ).std()
+    rolling_mean = series.rolling(window, min_periods=window // 2).mean()
+    rolling_std = series.rolling(window, min_periods=window // 2).std()
 
-    zscore = np.where( rolling_std != 0, (series - rolling_mean) / rolling_std , 0.0)
+    zscore = np.where( rolling_std > min_std,(series - rolling_mean) / rolling_std, 0.0)
 
-    return pd.Series(zscore, index=series.index)
+    result = pd.Series(zscore, index=series.index)
+
+    assert not np.isinf(result).any(), "Inf values in z-score — check min_std threshold"
+
+    return result
+
 
 
