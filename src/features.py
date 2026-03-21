@@ -45,10 +45,18 @@ def compute_percentile( series, window):
     return pctile
 
 
-def compute_rolling_volatility( spread_changes,  window):
 
-    vol = spread_changes.rolling(window, min_periods=window // 2).std()
-    
+def compute_rolling_volatility( spread_changes, window, trading_mask ):
+
+    changes = spread_changes.copy()
+
+    if trading_mask is not None:
+        # Set non-trading day changes to NaN so they don't contribute
+        # zero-change observations that artificially compress volatility
+        changes = changes.where(trading_mask)
+        logger.debug("Volatility: excluded %d non-trading days", (~trading_mask).sum())
+
+    vol = changes.rolling(window, min_periods=window // 2).std()
     return vol
 
 
