@@ -44,3 +44,12 @@ def compute_percentile( series, window):
 
     return pctile
 
+
+def compute_rolling_volatility( spread_changes,  window):
+
+    vol = spread_changes.rolling(window, min_periods=window // 2).std()
+    
+    return vol
+
+
+
