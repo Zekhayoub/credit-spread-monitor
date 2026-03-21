@@ -1,4 +1,12 @@
+"""
+Feature engineering for credit spread analysis.
+
+Computes rolling analytics used by fixed income professionals:
+z-scores, percentiles, realized volatility, compression ratios.
+"""
+
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -7,12 +15,28 @@ from src.config import CONFIG, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
+# Spread columns (used across multiple functions)
 SPREAD_COLS = ["aaa_spread", "aa_spread", "bbb_spread", "hy_spread"]
 
 
-def compute_spread_changes(df,spread_col,windows):
+def compute_spread_changes(
+    df: pd.DataFrame,
+    spread_col: str,
+    windows: list[int],
+) -> pd.DataFrame:
+    """
+    Compute absolute spread changes over multiple horizons.
+
+    Args:
+        df: Master DataFrame.
+        spread_col: Column name (e.g., "bbb_spread").
+        windows: List of lookback periods in trading days.
+
+    Returns:
+        DataFrame with new columns: {spread_col}_change_{N}d
+    """
     if spread_col not in df.columns:
-        raise KeyError(f"Column {spread_col} not found")
+        raise KeyError(f"Column {spread_col} not found in DataFrame")
 
     result = pd.DataFrame(index=df.index)
     for w in windows:
@@ -22,33 +46,93 @@ def compute_spread_changes(df,spread_col,windows):
     return result
 
 
-def compute_zscore(series, window, min_std=1e-8):
-    
+def compute_zscore(
+    series: pd.Series,
+    window: int,
+    min_std: float = 1e-8,
+) -> pd.Series:
+    """
+    Rolling z-score: (value - rolling_mean) / rolling_std.
+
+    Guards against division by zero and near-zero std that produce
+    extreme z-scores when spreads are flat.
+
+    Args:
+        series: Input time series.
+        window: Rolling window in trading days.
+        min_std: Minimum std threshold. Below this, z-score is set to 0.
+
+    Returns:
+        pd.Series of z-scores.
+    """
     rolling_mean = series.rolling(window, min_periods=window // 2).mean()
     rolling_std = series.rolling(window, min_periods=window // 2).std()
 
-    zscore = np.where( rolling_std > min_std,(series - rolling_mean) / rolling_std, 0.0)
+    zscore = np.where(
+        rolling_std > min_std,
+        (series - rolling_mean) / rolling_std,
+        0.0,
+    )
 
     result = pd.Series(zscore, index=series.index)
 
+    # Assertion: no inf values
     assert not np.isinf(result).any(), "Inf values in z-score — check min_std threshold"
 
     return result
 
 
 
-def compute_percentile( series, window):
+def compute_percentile(
+    series: pd.Series,
+    window: int,
+) -> pd.Series:
+    """
+    Rolling percentile rank (0 to 1).
 
-    # Vectorized, uses compiled C under the hood
-    # faster than .rolling().apply(lambda x: ...)
+    Unlike z-scores, percentiles make no distributional assumptions.
+    They are the primary metric for assessing whether spreads are
+    historically wide or tight.
+
+    A percentile of 0.90 means the current spread is wider than 90%
+    of observations in the lookback window.
+
+    Args:
+        series: Input time series.
+        window: Rolling window in trading days.
+
+    Returns:
+        pd.Series between 0.0 and 1.0.
+    """
+    # Vectorized — uses compiled C under the hood
+    # ~100x faster than .rolling().apply(lambda x: ...)
     pctile = series.rolling(window, min_periods=window // 2).rank() / window
 
     return pctile
 
 
 
-def compute_rolling_volatility( spread_changes, window, trading_mask ):
+def compute_rolling_volatility(
+    spread_changes: pd.Series,
+    window: int,
+    trading_mask: pd.Series | None = None,
+) -> pd.Series:
+    """
+    Rolling realized volatility, computed on real trading days only.
 
+    If a trading_mask is provided, forward-filled days (weekends,
+    holidays) are excluded from the volatility calculation to avoid
+    artificial zero-change days that compress the rolling std.
+
+    Args:
+        spread_changes: Daily spread changes (diff(1)).
+        window: Rolling window in trading days.
+        trading_mask: Boolean Series — True for real trading days.
+                      If None, all days are used (less accurate).
+
+    Returns:
+        pd.Series of rolling volatility.
+    """
     changes = spread_changes.copy()
 
     if trading_mask is not None:
@@ -61,8 +145,25 @@ def compute_rolling_volatility( spread_changes, window, trading_mask ):
     return vol
 
 
-def compute_compression_ratio(df ):
+def compute_compression_ratio(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute spread compression ratios.
 
+    bbb_hy_ratio: bbb_spread / hy_spread
+        Measures the crossover boundary between low IG and HY.
+        Note: this is NOT a full IG/HY ratio (IG spans AAA to BBB).
+        When this ratio falls -> HY widens faster -> risk-off.
+        When it rises -> spreads converge -> compression / risk-on.
+
+    aa_bbb_ratio: aa_spread / bbb_spread
+        Measures compression within Investment Grade.
+
+    Args:
+        df: DataFrame with spread columns.
+
+    Returns:
+        DataFrame with ratio columns.
+    """
     result = pd.DataFrame(index=df.index)
 
     if "bbb_spread" in df.columns and "hy_spread" in df.columns:
