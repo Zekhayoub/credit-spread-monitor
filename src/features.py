@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 import pandas as pd
 
 
@@ -18,3 +19,15 @@ def compute_spread_changes(df,spread_col,windows):
         result[col_name] = df[spread_col].diff(w)
 
     return result
+
+
+def compute_zscore(series,window):
+    
+    rolling_mean = series.rolling( window , min_periods = window // 2 ).mean()
+    rolling_std = series.rolling( window , min_periods = window // 2 ).std()
+
+    zscore = np.where( rolling_std != 0, (series - rolling_mean) / rolling_std , 0.0)
+
+    return pd.Series(zscore, index=series.index)
+
+
