@@ -83,6 +83,39 @@ def compute_zscore(
 
 
 
+
+def compute_zscore_ema(
+    series: pd.Series,
+    span: int,
+    min_std: float = 1e-8,
+) -> pd.Series:
+    """
+    EMA-based z-score that eliminates the ghost effect.
+
+    Unlike a fixed rolling window, the EMA never "forgets" a data point
+    abruptly. When a crisis exits a rolling window, the rolling z-score
+    spikes artificially. The EMA z-score decays smoothly.
+
+    Args:
+        series: Input time series.
+        span: EMA span (comparable to rolling window length).
+        min_std: Minimum std threshold.
+
+    Returns:
+        pd.Series of EMA z-scores.
+    """
+    ema_mean = series.ewm(span=span, min_periods=span // 2).mean()
+    ema_std = series.ewm(span=span, min_periods=span // 2).std()
+
+    zscore = np.where(
+        ema_std > min_std,
+        (series - ema_mean) / ema_std,
+        0.0,
+    )
+
+    return pd.Series(zscore, index=series.index)
+
+
 def compute_percentile(
     series: pd.Series,
     window: int,
@@ -215,6 +248,10 @@ def apply_rolling_analytics(
     # Z-scores
     for w in features["zscore_windows"]:
         result[f"{spread_col}_zscore_{w}d"] = compute_zscore(df[spread_col], w)
+    
+    # EMA z-scores (eliminates ghost effect from fixed rolling windows)
+    for w in features["zscore_windows"]:
+        result[f"{spread_col}_zscore_ema_{w}d"] = compute_zscore_ema(df[spread_col], w)
 
     # Percentiles
     for w in features["percentile_windows"]:
