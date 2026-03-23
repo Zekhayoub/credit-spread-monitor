@@ -17,19 +17,23 @@ logger = logging.getLogger(__name__)
 def prepare_hmm_features(
     df: pd.DataFrame,
     feature_names: list[str],
-) -> tuple[np.ndarray, pd.DatetimeIndex, StandardScaler]:
+    min_history: int = 252,
+) -> tuple[np.ndarray, pd.DatetimeIndex]:
     """
-    Select and standardize features for HMM input.
+    Select and standardize features for HMM input using expanding window.
+
+    IMPORTANT: Uses expanding (cumulative) mean and std instead of a global
+    StandardScaler to avoid look-ahead bias. At each date t, normalization
+    uses only data from [0, t], never future observations.
 
     Args:
         df: Enriched master DataFrame.
         feature_names: Column names to use as HMM inputs.
+        min_history: Minimum observations before scaling starts.
+                     Earlier rows are dropped (not enough history to normalize).
 
     Returns:
-        Tuple of (X_scaled array, aligned DatetimeIndex, fitted scaler).
-
-    Raises:
-        KeyError: If any feature_name is not in df.
+        Tuple of (X_scaled array, aligned DatetimeIndex).
     """
     # Validate features exist
     missing = [f for f in feature_names if f not in df.columns]
@@ -44,18 +48,29 @@ def prepare_hmm_features(
     if rows_dropped > 0:
         logger.info("Dropped %d NaN rows from HMM features", rows_dropped)
 
-    index = X_raw.index
+    # Expanding window standardization (no look-ahead bias)
+    expanding_mean = X_raw.expanding(min_periods=min_history).mean()
+    expanding_std = X_raw.expanding(min_periods=min_history).std()
 
-    # Standardize
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_raw.values)
+    # Replace zero std with small value to avoid division by zero
+    expanding_std = expanding_std.replace(0, 1e-8)
+
+    X_scaled_df = (X_raw - expanding_mean) / expanding_std
+
+    # Drop rows where expanding window hasn't accumulated enough history
+    X_scaled_df = X_scaled_df.dropna()
+
+    index = X_scaled_df.index
+    X_scaled = X_scaled_df.values
 
     logger.info(
-        "Prepared HMM features: %d observations x %d features",
+        "Prepared HMM features (expanding window, no look-ahead): "
+        "%d observations x %d features (dropped %d for warm-up)",
         X_scaled.shape[0], X_scaled.shape[1],
+        rows_before - len(X_scaled_df),
     )
 
-    return X_scaled, index, scaler
+    return X_scaled, index
 
 
 
