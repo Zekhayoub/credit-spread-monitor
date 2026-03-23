@@ -68,43 +68,62 @@ def fit_hmm(
     random_state: int = 42,
 ) -> GaussianHMM:
     """
-    Fit a Gaussian HMM on the prepared features.
+    Fit a Gaussian HMM with multiple random initializations.
+
+    Runs n_init fits with different random seeds and keeps the model
+    with the highest log-likelihood. This stabilizes results that would
+    otherwise vary between runs due to EM's sensitivity to initialization.
 
     Args:
-        X: Scaled feature array (n_samples, n_features).
+        X: Scaled feature array.
         n_states: Number of hidden states.
-        n_iter: Max EM iterations.
-        n_init: Number of random initializations (best is kept).
-        covariance_type: Covariance matrix type ("full", "diag", "tied").
-        random_state: Random seed for reproducibility.
+        n_iter: Max EM iterations per fit.
+        n_init: Number of random initializations.
+        covariance_type: Covariance type.
+        random_state: Base random seed.
 
     Returns:
-        Fitted GaussianHMM model.
+        Best fitted GaussianHMM (highest log-likelihood).
     """
     logger.info(
-        "Fitting GaussianHMM: %d states, %d features, %d observations...",
-        n_states, X.shape[1], X.shape[0],
+        "Fitting GaussianHMM: %d states, %d inits, %d features, %d obs...",
+        n_states, n_init, X.shape[1], X.shape[0],
     )
 
-    model = GaussianHMM(
-        n_components=n_states,
-        covariance_type=covariance_type,
-        n_iter=n_iter,
-        random_state=random_state,
-    )
-    model.fit(X)
+    best_model = None
+    best_score = -np.inf
 
-    # Check convergence
-    if hasattr(model, "monitor_") and hasattr(model.monitor_, "converged"):
-        if model.monitor_.converged:
-            logger.info("  HMM converged after %d iterations", model.monitor_.iter)
-        else:
-            logger.warning("  HMM did NOT converge after %d iterations", n_iter)
+    for i in range(n_init):
+        try:
+            model = GaussianHMM(
+                n_components=n_states,
+                covariance_type=covariance_type,
+                n_iter=n_iter,
+                random_state=random_state + i,
+            )
+            model.fit(X)
+            score = model.score(X)
+
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+        except Exception:
+            continue  # some inits may fail, that's expected
+
+    if best_model is None:
+        raise RuntimeError(f"All {n_init} initializations failed for {n_states} states")
+
+    converged = (hasattr(best_model, "monitor_") and 
+                 hasattr(best_model.monitor_, "converged") and 
+                 best_model.monitor_.converged)
     
-    log_likelihood = model.score(X)
-    logger.info("  Log-likelihood: %.2f", log_likelihood)
+    logger.info(
+        "  Best of %d inits: log_lik=%.2f, converged=%s",
+        n_init, best_score, converged,
+    )
 
-    return model
+    return best_model
 
 
 
