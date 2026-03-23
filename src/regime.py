@@ -109,5 +109,88 @@ def fit_hmm(
 
 
 
+def compute_n_params(n_states: int, n_features: int, covariance_type: str = "full") -> int:
+    """
+    Compute number of free parameters in a Gaussian HMM.
+    
+    First version — simplified calculation.
+    """
+    # Transition matrix: n_states * (n_states - 1) free params
+    n_transition = n_states * (n_states - 1)
+    # Means: n_states * n_features
+    n_means = n_states * n_features
+    # Covariances (simplified — will be corrected later)
+    if covariance_type == "full":
+        n_cov = n_states * n_features * n_features
+    elif covariance_type == "diag":
+        n_cov = n_states * n_features
+    else:
+        n_cov = n_features * n_features
+    
+    return n_transition + n_means + n_cov
+
+
+def select_n_states_bic(
+    X: np.ndarray,
+    n_range: list[int],
+    config: dict = CONFIG,
+) -> tuple[int, dict]:
+    """
+    Select optimal number of HMM states using BIC.
+
+    BIC = -2 * log_likelihood + n_params * log(n_observations)
+
+    Args:
+        X: Scaled feature array.
+        n_range: List of state counts to test.
+        config: Configuration dict.
+
+    Returns:
+        Tuple of (optimal n_states, dict of {n: bic_value}).
+    """
+    regime_cfg = config["regime"]
+    n_obs = X.shape[0]
+    n_features = X.shape[1]
+    results = {}
+
+    for n in n_range:
+        try:
+            model = fit_hmm(
+                X, n_states=n,
+                n_iter=regime_cfg["n_iter"],
+                n_init=regime_cfg.get("n_init", 10),
+                covariance_type=regime_cfg["covariance_type"],
+                random_state=regime_cfg["random_state"],
+            )
+            
+            log_likelihood = model.score(X) * n_obs  # score() returns per-sample
+            n_params = compute_n_params(n, n_features, regime_cfg["covariance_type"])
+            bic = -2 * log_likelihood + n_params * np.log(n_obs)
+            
+            results[n] = bic
+            logger.info("  n_states=%d: BIC=%.2f (log_lik=%.2f, n_params=%d)",
+                        n, bic, log_likelihood, n_params)
+
+        except Exception as e:
+            logger.warning("  n_states=%d: failed (%s)", n, e)
+            results[n] = np.inf
+
+    # Select best
+    best_n = min(results, key=results.get)
+    
+    # Fallback if BIC is inconclusive (all very close)
+    bic_values = [v for v in results.values() if v != np.inf]
+    if len(bic_values) > 1:
+        bic_range = max(bic_values) - min(bic_values)
+        if bic_range < 10:  # arbitrary threshold for "too close"
+            best_n = config["regime"]["n_states_default"]
+            logger.warning(
+                "BIC values too close (range=%.2f). Falling back to default: %d states",
+                bic_range, best_n,
+            )
+
+    logger.info("Selected %d states (BIC=%.2f)", best_n, results[best_n])
+    return best_n, results
+
 
 
