@@ -59,3 +59,55 @@ def prepare_hmm_features(
 
 
 
+def fit_hmm(
+    X: np.ndarray,
+    n_states: int,
+    n_iter: int = 200,
+    n_init: int = 50,
+    covariance_type: str = "full",
+    random_state: int = 42,
+) -> GaussianHMM:
+    """
+    Fit a Gaussian HMM on the prepared features.
+
+    Args:
+        X: Scaled feature array (n_samples, n_features).
+        n_states: Number of hidden states.
+        n_iter: Max EM iterations.
+        n_init: Number of random initializations (best is kept).
+        covariance_type: Covariance matrix type ("full", "diag", "tied").
+        random_state: Random seed for reproducibility.
+
+    Returns:
+        Fitted GaussianHMM model.
+    """
+    logger.info(
+        "Fitting GaussianHMM: %d states, %d features, %d observations...",
+        n_states, X.shape[1], X.shape[0],
+    )
+
+    model = GaussianHMM(
+        n_components=n_states,
+        covariance_type=covariance_type,
+        n_iter=n_iter,
+        random_state=random_state,
+    )
+    model.fit(X)
+
+    # Check convergence
+    if hasattr(model, "monitor_") and hasattr(model.monitor_, "converged"):
+        if model.monitor_.converged:
+            logger.info("  HMM converged after %d iterations", model.monitor_.iter)
+        else:
+            logger.warning("  HMM did NOT converge after %d iterations", n_iter)
+    
+    log_likelihood = model.score(X)
+    logger.info("  Log-likelihood: %.2f", log_likelihood)
+
+    return model
+
+
+
+
+
+
