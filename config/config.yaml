@@ -31,10 +31,17 @@ regime:
   covariance_type: "full"
   random_state: 42
   input_features:
-    - "bbb_spread_change_1d"
-    - "hy_spread_change_1d"
-    - "bbb_rolling_vol_20d"
-    - "bbb_hy_ratio_change_1d"
+    # Original (problematic — bbb and hy changes correlated at 0.87):
+    #   - "bbb_spread_change_1d"
+    #   - "hy_spread_change_1d"
+    #   - "bbb_rolling_vol_20d"
+    #   - "bbb_hy_ratio_change_1d"
+    
+    # Fixed — orthogonal features covering different dimensions:
+    - "hy_spread_change_1d"        # spread momentum (most volatile rating)
+    - "bbb_hy_ratio"               # compression level (cross-rating structure)
+    - "bbb_spread_rolling_vol_20d" # realized volatility (risk dimension)
+    - "vix"                        # macro risk signal (external to credit)
 
 stress:
   vix_thresholds: [25, 30, 35]
