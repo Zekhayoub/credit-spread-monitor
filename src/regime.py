@@ -145,23 +145,52 @@ def fit_hmm(
 
 def compute_n_params(n_states: int, n_features: int, covariance_type: str = "full") -> int:
     """
-    Compute number of free parameters in a Gaussian HMM.
-    
-    First version — simplified calculation.
+    Compute the exact number of free parameters in a Gaussian HMM.
+
+    For 3 states and 4 features with full covariance:
+    - Transition matrix: 3 * (3-1) = 6 free params
+    - Means: 3 * 4 = 12 params
+    - Covariances (symmetric): 3 * 4 * (4+1) / 2 = 30 params
+    - Initial state probs: 3 - 1 = 2 params
+    - Total: 50 params
+
+    Args:
+        n_states: Number of hidden states.
+        n_features: Number of observation features.
+        covariance_type: "full", "diag", or "tied".
+
+    Returns:
+        Number of free parameters.
     """
-    # Transition matrix: n_states * (n_states - 1) free params
+    # Transition matrix: each row sums to 1, so n_states - 1 free per row
     n_transition = n_states * (n_states - 1)
+
+    # Initial state distribution: n_states - 1 free params
+    n_initial = n_states - 1
+
     # Means: n_states * n_features
     n_means = n_states * n_features
-    # Covariances (simplified — will be corrected later)
+
+    # Covariance matrices (symmetric positive definite)
     if covariance_type == "full":
-        n_cov = n_states * n_features * n_features
+        # Each state has a full symmetric matrix: n_features * (n_features + 1) / 2
+        n_cov = n_states * n_features * (n_features + 1) // 2
     elif covariance_type == "diag":
         n_cov = n_states * n_features
+    elif covariance_type == "tied":
+        n_cov = n_features * (n_features + 1) // 2
     else:
-        n_cov = n_features * n_features
+        n_cov = n_states * n_features  # fallback to diag
+
+    total = n_transition + n_initial + n_means + n_cov
     
-    return n_transition + n_means + n_cov
+    logger.debug(
+        "HMM params (n=%d, f=%d, %s): transition=%d, initial=%d, means=%d, cov=%d, total=%d",
+        n_states, n_features, covariance_type,
+        n_transition, n_initial, n_means, n_cov, total,
+    )
+
+    return total
 
 
 def select_n_states_bic(
