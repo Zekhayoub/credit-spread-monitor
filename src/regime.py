@@ -266,8 +266,14 @@ def label_regimes(
     """
     Predict regimes and assign interpretable labels.
 
-    First version: labels based on mean bbb_spread per state.
-    Lowest mean = risk_on, highest = crisis.
+    Uses multi-dimensional criteria:
+    - Mean spread level (high = stress)
+    - Mean momentum (negative = compression/recovery, positive = widening)
+    - Mean volatility (high = unstable)
+
+    This avoids the naive labeling where a high-spread recovery period
+    (like Q3 2020) gets mislabeled as "crisis" just because spread
+    levels are still elevated.
 
     Args:
         model: Fitted GaussianHMM.
@@ -283,41 +289,78 @@ def label_regimes(
     state_probs = model.predict_proba(X)
     max_probs = state_probs.max(axis=1)
 
-    # Compute mean bbb_spread per state for labeling
+    # Build state profiles
     df_aligned = df.loc[index].copy()
     df_aligned["state"] = states
 
-    state_means = df_aligned.groupby("state")["bbb_spread"].mean().sort_values()
-    
-    # Map: lowest mean -> risk_on, middle -> risk_off, highest -> crisis
-    n_states = model.n_components
+    profiles = {}
+    for state in sorted(df_aligned["state"].unique()):
+        mask = df_aligned["state"] == state
+        profiles[state] = {
+            "mean_spread": df_aligned.loc[mask, "bbb_spread"].mean(),
+            "mean_momentum": df_aligned.loc[mask, "bbb_spread_change_20d"].mean()
+                             if "bbb_spread_change_20d" in df_aligned.columns else 0,
+            "mean_vol": df_aligned.loc[mask, "bbb_spread_rolling_vol_20d"].mean()
+                        if "bbb_spread_rolling_vol_20d" in df_aligned.columns else 0,
+            "count": mask.sum(),
+        }
+
+    logger.info("State profiles:")
+    for state, profile in profiles.items():
+        logger.info(
+            "  State %d: spread=%.3f, momentum=%.4f, vol=%.4f, n=%d",
+            state, profile["mean_spread"], profile["mean_momentum"],
+            profile["mean_vol"], profile["count"],
+        )
+
+    # Multi-dimensional labeling
+    # Score each state: high spread + positive momentum + high vol = crisis
+    # Low spread + low vol = risk_on
+    # High spread + negative momentum = recovery (label as risk_off)
+    state_scores = {}
+    for state, p in profiles.items():
+        # Composite score: higher = more stressed
+        # Momentum sign matters: positive momentum (widening) adds to stress
+        score = (
+            p["mean_spread"] * 1.0
+            + p["mean_momentum"] * 50.0   # amplify momentum signal
+            + p["mean_vol"] * 10.0
+        )
+        state_scores[state] = score
+
+    # Sort states by composite score
+    sorted_states = sorted(state_scores, key=state_scores.get)
+
+    n_states = len(sorted_states)
     if n_states == 3:
         label_map = {
-            state_means.index[0]: "risk_on",
-            state_means.index[1]: "risk_off",
-            state_means.index[2]: "crisis",
+            sorted_states[0]: "risk_on",
+            sorted_states[1]: "risk_off",
+            sorted_states[2]: "crisis",
         }
     elif n_states == 2:
         label_map = {
-            state_means.index[0]: "risk_on",
-            state_means.index[1]: "crisis",
+            sorted_states[0]: "risk_on",
+            sorted_states[1]: "crisis",
         }
     else:
-        # Generic labeling for 4+ states
         label_map = {}
-        for i, state_idx in enumerate(state_means.index):
+        for i, state in enumerate(sorted_states):
             if i == 0:
-                label_map[state_idx] = "risk_on"
-            elif i == len(state_means) - 1:
-                label_map[state_idx] = "crisis"
+                label_map[state] = "risk_on"
+            elif i == len(sorted_states) - 1:
+                label_map[state] = "crisis"
             else:
-                label_map[state_idx] = f"risk_off_{i}"
+                label_map[state] = f"transition_{i}"
 
-    # Apply labels
+    # Apply
     df_aligned["regime"] = df_aligned["state"].map(label_map)
     df_aligned["regime_proba"] = max_probs
 
-    logger.info("Regime distribution:")
+    # Drop temporary state column
+    df_aligned = df_aligned.drop(columns=["state"])
+
+    logger.info("Regime distribution (final):")
     for regime, count in df_aligned["regime"].value_counts().items():
         pct = count / len(df_aligned) * 100
         logger.info("  %s: %d days (%.1f%%)", regime, count, pct)
