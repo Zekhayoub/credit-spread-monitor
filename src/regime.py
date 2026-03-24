@@ -257,3 +257,72 @@ def select_n_states_bic(
 
 
 
+def label_regimes(
+    model: GaussianHMM,
+    X: np.ndarray,
+    df: pd.DataFrame,
+    index: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    """
+    Predict regimes and assign interpretable labels.
+
+    First version: labels based on mean bbb_spread per state.
+    Lowest mean = risk_on, highest = crisis.
+
+    Args:
+        model: Fitted GaussianHMM.
+        X: Scaled feature array.
+        df: Original enriched DataFrame.
+        index: DatetimeIndex aligned to X.
+
+    Returns:
+        DataFrame with 'regime' and 'regime_proba' columns added.
+    """
+    # Predict states and probabilities
+    states = model.predict(X)
+    state_probs = model.predict_proba(X)
+    max_probs = state_probs.max(axis=1)
+
+    # Compute mean bbb_spread per state for labeling
+    df_aligned = df.loc[index].copy()
+    df_aligned["state"] = states
+
+    state_means = df_aligned.groupby("state")["bbb_spread"].mean().sort_values()
+    
+    # Map: lowest mean -> risk_on, middle -> risk_off, highest -> crisis
+    n_states = model.n_components
+    if n_states == 3:
+        label_map = {
+            state_means.index[0]: "risk_on",
+            state_means.index[1]: "risk_off",
+            state_means.index[2]: "crisis",
+        }
+    elif n_states == 2:
+        label_map = {
+            state_means.index[0]: "risk_on",
+            state_means.index[1]: "crisis",
+        }
+    else:
+        # Generic labeling for 4+ states
+        label_map = {}
+        for i, state_idx in enumerate(state_means.index):
+            if i == 0:
+                label_map[state_idx] = "risk_on"
+            elif i == len(state_means) - 1:
+                label_map[state_idx] = "crisis"
+            else:
+                label_map[state_idx] = f"risk_off_{i}"
+
+    # Apply labels
+    df_aligned["regime"] = df_aligned["state"].map(label_map)
+    df_aligned["regime_proba"] = max_probs
+
+    logger.info("Regime distribution:")
+    for regime, count in df_aligned["regime"].value_counts().items():
+        pct = count / len(df_aligned) * 100
+        logger.info("  %s: %d days (%.1f%%)", regime, count, pct)
+
+    return df_aligned
+
+
+
