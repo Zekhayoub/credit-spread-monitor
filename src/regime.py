@@ -369,3 +369,72 @@ def label_regimes(
 
 
 
+def compute_transition_matrix(
+    regimes: pd.Series,
+) -> pd.DataFrame:
+    """
+    Compute empirical regime transition probabilities.
+
+    Counts transitions regime[t] -> regime[t+1] and normalizes to probabilities.
+
+    Args:
+        regimes: Series of regime labels (e.g., "risk_on", "risk_off", "crisis").
+
+    Returns:
+        DataFrame: transition probability matrix (rows = from, columns = to).
+    """
+    labels = sorted(regimes.unique())
+    matrix = pd.DataFrame(0.0, index=labels, columns=labels)
+
+    for (curr, nxt) in zip(regimes.iloc[:-1], regimes.iloc[1:]):
+        matrix.loc[curr, nxt] += 1
+
+    # Normalize rows to probabilities
+    row_sums = matrix.sum(axis=1)
+    matrix = matrix.div(row_sums, axis=0)
+
+    return matrix
+
+
+def compute_regime_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute summary statistics per regime.
+
+    For each regime: mean/median/std of each spread, mean volatility,
+    mean episode duration.
+
+    Args:
+        df: DataFrame with 'regime' column.
+
+    Returns:
+        DataFrame with one row per regime.
+    """
+    stats = []
+    spread_cols = [c for c in df.columns if c.endswith("_spread")]
+    vol_cols = [c for c in df.columns if "rolling_vol" in c]
+
+    for regime in sorted(df["regime"].unique()):
+        mask = df["regime"] == regime
+        row = {"regime": regime, "n_days": mask.sum()}
+
+        for col in spread_cols:
+            row[f"{col}_mean"] = df.loc[mask, col].mean()
+            row[f"{col}_median"] = df.loc[mask, col].median()
+            row[f"{col}_std"] = df.loc[mask, col].std()
+
+        for col in vol_cols[:2]:  # top 2 vol columns
+            row[f"{col}_mean"] = df.loc[mask, col].mean()
+
+        # Episode duration: count consecutive days in same regime
+        regime_blocks = (df["regime"] != df["regime"].shift()).cumsum()
+        regime_episodes = df.loc[mask].groupby(regime_blocks[mask]).size()
+        row["mean_episode_days"] = regime_episodes.mean()
+        row["median_episode_days"] = regime_episodes.median()
+        row["n_episodes"] = len(regime_episodes)
+
+        stats.append(row)
+
+    return pd.DataFrame(stats)
+
+
+
