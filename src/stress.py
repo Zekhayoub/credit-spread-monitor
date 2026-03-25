@@ -6,7 +6,12 @@ the forward impact on credit spreads across multiple horizons.
 """
 
 import logging
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
+
+from src.config import CONFIG, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +50,8 @@ def identify_trigger_dates(
 
 
 
+
+
 def compute_forward_impact(
     df: pd.DataFrame,
     trigger_dates: list[pd.Timestamp],
@@ -52,9 +59,17 @@ def compute_forward_impact(
     forward_windows: list[int],
 ) -> pd.DataFrame:
     """
-    Measure spread impact at fixed horizons after each trigger date.
+    Measure spread impact after each trigger date.
 
-    First version: point-to-point impact only (final - initial).
+    Computes both point-to-point AND path-based metrics:
+    - final_impact: spread[T+N] - spread[T] (can mask intra-window extremes)
+    - max_widening: worst spread widening within the window
+    - max_compression: best spread tightening within the window
+    - time_to_peak: trading days from trigger to worst widening
+    - relative_impact: final_impact / spread_at_trigger (for cross-rating comparison)
+
+    The max_widening is what actually triggers margin calls and forced selling.
+    A fund doesn't survive to T+60 if it blows up at T+15.
 
     Args:
         df: DataFrame with spread data.
@@ -63,7 +78,7 @@ def compute_forward_impact(
         forward_windows: List of forward horizons in trading days.
 
     Returns:
-        DataFrame with one row per episode, columns for each horizon.
+        DataFrame with one row per (episode, window) combination.
     """
     records = []
 
@@ -73,24 +88,42 @@ def compute_forward_impact(
 
         trigger_loc = df.index.get_loc(trigger)
         spread_at_trigger = df[spread_col].iloc[trigger_loc]
-        record = {
-            "trigger_date": trigger,
-            "spread_at_trigger": spread_at_trigger,
-        }
 
         for window in forward_windows:
-            end_loc = trigger_loc + window
-            if end_loc >= len(df):
-                record[f"impact_{window}d"] = np.nan
-                continue
+            end_loc = min(trigger_loc + window, len(df) - 1)
+            if trigger_loc + window >= len(df):
+                continue  # skip if not enough data
 
-            spread_at_end = df[spread_col].iloc[end_loc]
-            record[f"impact_{window}d"] = spread_at_end - spread_at_trigger
+            # Extract the path within the window
+            path = df[spread_col].iloc[trigger_loc:end_loc + 1]
+            path_changes = path - spread_at_trigger
 
-        records.append(record)
+            final_impact = path_changes.iloc[-1]
+            max_widening = path_changes.max()
+            max_compression = path_changes.min()
+            
+            # Time to peak widening (in trading days)
+            time_to_peak = path_changes.idxmax()
+            time_to_peak_days = (time_to_peak - trigger).days if pd.notna(time_to_peak) else None
+
+            # Relative impact (for cross-rating comparison)
+            relative_impact = final_impact / spread_at_trigger if spread_at_trigger != 0 else np.nan
+            relative_max_widening = max_widening / spread_at_trigger if spread_at_trigger != 0 else np.nan
+
+            records.append({
+                "trigger_date": trigger,
+                "spread_col": spread_col,
+                "window": window,
+                "spread_at_trigger": spread_at_trigger,
+                "final_impact": final_impact,
+                "max_widening": max_widening,
+                "max_compression": max_compression,
+                "time_to_peak_days": time_to_peak_days,
+                "relative_final_impact": relative_impact,
+                "relative_max_widening": relative_max_widening,
+            })
 
     return pd.DataFrame(records)
-
 
 
 
