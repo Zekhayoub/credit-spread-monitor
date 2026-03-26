@@ -178,3 +178,98 @@ def run_scenario(
 
 
 
+
+
+
+
+
+
+def run_all_stress_tests(config: dict = CONFIG) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Run all stress test scenarios and compile results.
+
+    Scenarios:
+    - VIX level triggers: VIX > [25, 30, 35]
+    - VIX shock triggers: delta VIX > [8, 10, 15] over 5 days
+      (These capture the SHOCK, not the level — more actionable)
+    - HY widening: hy_spread 20d change > threshold
+    - Rate shock: treasury_10y 20d change > threshold
+
+    Returns:
+        Tuple of (detailed episodes DataFrame, summary stats DataFrame).
+    """
+    proc_dir = PROJECT_ROOT / config["paths"]["processed"]
+    results_dir = PROJECT_ROOT / config["paths"]["results"]
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_csv(proc_dir / "master_with_regimes.csv", index_col=0, parse_dates=True)
+    spread_cols = ["bbb_spread", "hy_spread"]
+    stress_cfg = config["stress"]
+
+    all_episodes = []
+
+    # --- VIX level triggers ---
+    for threshold in stress_cfg["vix_thresholds"]:
+        condition = df["vix"] > threshold
+        result = run_scenario(df, f"VIX_level>{threshold}", condition, spread_cols, config)
+        all_episodes.append(result)
+
+    # --- VIX shock triggers (delta) ---
+    # The VIX level is a lagging indicator — by the time it hits 30,
+    # spreads have already widened. The SHOCK (rate of change) is what matters.
+    vix_shock_thresholds = [8, 10, 15]
+    df["vix_change_5d"] = df["vix"].diff(5)
+    for threshold in vix_shock_thresholds:
+        condition = df["vix_change_5d"] > threshold
+        result = run_scenario(df, f"VIX_shock_5d>{threshold}", condition, spread_cols, config)
+        all_episodes.append(result)
+
+    # --- HY widening ---
+    if "hy_spread_change_20d" in df.columns:
+        condition = df["hy_spread_change_20d"] > stress_cfg["hy_widening_20d"]
+        result = run_scenario(df, "HY_widening_20d", condition, spread_cols, config)
+        all_episodes.append(result)
+
+    # --- Rate shock ---
+    if "treasury_10y" in df.columns:
+        df["treasury_10y_change_20d"] = df["treasury_10y"].diff(20)
+        condition = df["treasury_10y_change_20d"] > stress_cfg["yield_rise_20d"]
+        result = run_scenario(df, "Rate_shock_20d", condition, spread_cols, config)
+        all_episodes.append(result)
+
+    # Combine
+    episodes = pd.concat(all_episodes, ignore_index=True)
+
+    # Summary statistics
+    summary = (
+        episodes
+        .groupby(["scenario", "spread_col", "window"])
+        .agg(
+            n_episodes=("final_impact", "count"),
+            mean_final_impact=("final_impact", "mean"),
+            median_final_impact=("final_impact", "median"),
+            mean_max_widening=("max_widening", "mean"),
+            median_max_widening=("max_widening", "median"),
+            mean_relative_impact=("relative_final_impact", "mean"),
+            mean_relative_max_widening=("relative_max_widening", "mean"),
+        )
+        .reset_index()
+    )
+
+    # Save
+    episodes.to_csv(results_dir / "stress_episodes.csv", index=False)
+    summary.to_csv(results_dir / "stress_test_results.csv", index=False)
+
+    logger.info("Stress testing complete: %d total episodes across all scenarios", len(episodes))
+
+    return episodes, summary
+
+
+
+
+
+
+
+
+
+
