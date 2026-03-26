@@ -127,3 +127,54 @@ def compute_forward_impact(
 
 
 
+def run_scenario(
+    df: pd.DataFrame,
+    scenario_name: str,
+    condition: pd.Series,
+    spread_cols: list[str],
+    config: dict = CONFIG,
+) -> pd.DataFrame:
+    """
+    Run a single stress test scenario.
+
+    Args:
+        df: Enriched DataFrame.
+        scenario_name: Human-readable name (e.g., "VIX > 30").
+        condition: Boolean Series of trigger dates.
+        spread_cols: Spreads to measure impact on.
+        config: Configuration dict.
+
+    Returns:
+        DataFrame with impact results for all spreads and windows.
+    """
+    stress_cfg = config["stress"]
+    cooldown = stress_cfg["cooldown_days"]
+    forward_windows = stress_cfg["forward_windows"]
+    min_episodes = stress_cfg["min_episodes"]
+
+    trigger_dates = identify_trigger_dates(condition, cooldown)
+
+    if len(trigger_dates) == 0:
+        logger.warning("Scenario '%s': 0 trigger dates. Skipping.", scenario_name)
+        return pd.DataFrame()
+
+    if len(trigger_dates) < min_episodes:
+        logger.warning(
+            "Scenario '%s': only %d episodes (min=%d). Results may not be statistically significant.",
+            scenario_name, len(trigger_dates), min_episodes,
+        )
+
+    all_impacts = []
+    for spread_col in spread_cols:
+        impacts = compute_forward_impact(df, trigger_dates, spread_col, forward_windows)
+        impacts["scenario"] = scenario_name
+        all_impacts.append(impacts)
+
+    result = pd.concat(all_impacts, ignore_index=True)
+    logger.info("Scenario '%s': %d episodes, %d impact measurements",
+                scenario_name, len(trigger_dates), len(result))
+
+    return result
+
+
+
