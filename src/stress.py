@@ -178,8 +178,36 @@ def run_scenario(
 
 
 
+def bootstrap_confidence_interval(
+    values: np.ndarray,
+    n_bootstrap: int = 1000,
+    confidence: float = 0.95,
+) -> tuple[float, float, float]:
+    """
+    Compute bootstrap confidence interval for the mean.
 
+    Args:
+        values: Array of observations.
+        n_bootstrap: Number of bootstrap samples.
+        confidence: Confidence level (e.g., 0.95 for 95% CI).
 
+    Returns:
+        Tuple of (mean, ci_lower, ci_upper).
+    """
+    if len(values) < 3:
+        return np.mean(values), np.nan, np.nan
+
+    rng = np.random.RandomState(42)
+    means = []
+    for _ in range(n_bootstrap):
+        sample = rng.choice(values, size=len(values), replace=True)
+        means.append(np.mean(sample))
+
+    alpha = (1 - confidence) / 2
+    ci_lower = np.percentile(means, alpha * 100)
+    ci_upper = np.percentile(means, (1 - alpha) * 100)
+
+    return np.mean(values), ci_lower, ci_upper
 
 
 
@@ -256,17 +284,36 @@ def run_all_stress_tests(config: dict = CONFIG) -> tuple[pd.DataFrame, pd.DataFr
         .reset_index()
     )
 
+    # Add bootstrap CI to summary
+    ci_records = []
+    for _, group in episodes.groupby(["scenario", "spread_col", "window"]):
+        values = group["max_widening"].dropna().values
+        
+        if len(values) == 0:
+            continue
+            
+        mean_val, ci_low, ci_high = bootstrap_confidence_interval(values)
+        ci_records.append({
+            "scenario": group["scenario"].iloc[0],
+            "spread_col": group["spread_col"].iloc[0],
+            "window": group["window"].iloc[0],
+            "n_episodes": len(values),
+            "max_widening_mean": mean_val,
+            "max_widening_ci_lower": ci_low,
+            "max_widening_ci_upper": ci_high,
+            "significant": len(values) >= 10,  # flag low-sample results
+        })
+
+    ci_df = pd.DataFrame(ci_records)
+
     # Save
     episodes.to_csv(results_dir / "stress_episodes.csv", index=False)
     summary.to_csv(results_dir / "stress_test_results.csv", index=False)
+    ci_df.to_csv(results_dir / "stress_test_confidence.csv", index=False)
 
     logger.info("Stress testing complete: %d total episodes across all scenarios", len(episodes))
 
     return episodes, summary
-
-
-
-
 
 
 
