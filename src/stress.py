@@ -317,6 +317,29 @@ def run_all_stress_tests(config: dict = CONFIG) -> tuple[pd.DataFrame, pd.DataFr
 
 
 
+def cooldown_sensitivity(
+    df: pd.DataFrame,
+    condition: pd.Series,
+    cooldowns: list[int] = [10, 20, 40],
+) -> pd.DataFrame:
+    """
+    Test sensitivity of trigger count to cooldown parameter.
+
+    Args:
+        df: DataFrame.
+        condition: Boolean trigger condition.
+        cooldowns: List of cooldown values to test.
+
+    Returns:
+        DataFrame with cooldown value and number of episodes.
+    """
+    records = []
+    for cd in cooldowns:
+        triggers = identify_trigger_dates(condition, cooldown=cd)
+        records.append({"cooldown_days": cd, "n_episodes": len(triggers)})
+
+    return pd.DataFrame(records)
+
 
 
 
