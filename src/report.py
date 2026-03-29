@@ -182,4 +182,59 @@ def create_dashboard_sheet(ws, df: pd.DataFrame) -> None:
 
 
 
-    
+def create_history_sheet(ws, df: pd.DataFrame) -> None:
+    """
+    Create the Historical sheet — last 252 trading days of spread data
+    plus embedded charts.
+    """
+    from openpyxl.drawing.image import Image as XLImage
+
+    # Title
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "Historical Spread Data (Last 252 Trading Days)"
+    ws["A1"].font = Font(bold=True, size=12, color="2C3E50")
+
+    # Data table
+    last_252 = df.tail(252)
+    data_cols = ["aaa_spread", "aa_spread", "bbb_spread", "hy_spread", "vix"]
+    available_cols = [c for c in data_cols if c in last_252.columns]
+
+    headers = ["Date"] + [c.replace("_spread", "").upper() for c in available_cols]
+    write_header_row(ws, 3, headers)
+
+    for i, (date, row) in enumerate(last_252[available_cols].iterrows()):
+        ws.cell(row=4 + i, column=1, value=date.strftime("%Y-%m-%d"))
+        ws.cell(row=4 + i, column=1).border = THIN_BORDER
+        for j, col in enumerate(available_cols):
+            cell = ws.cell(row=4 + i, column=2 + j, value=round(row[col], 4))
+            cell.border = THIN_BORDER
+
+    # Embed charts (if figures exist)
+    figures_dir = PROJECT_ROOT / "figures"
+    chart_col = len(available_cols) + 3  # place charts to the right of data
+
+    charts_to_embed = [
+        "spread_history.png",
+        "zscore_bbb.png",
+        "volatility_comparison.png",
+    ]
+
+    row_offset = 3
+    for chart_file in charts_to_embed:
+        chart_path = figures_dir / chart_file
+        if chart_path.exists():
+            try:
+                img = XLImage(str(chart_path))
+                img.width = 600
+                img.height = 300
+                cell_ref = f"{get_column_letter(chart_col)}{row_offset}"
+                ws.add_image(img, cell_ref)
+                row_offset += 18  # space between charts
+            except Exception as e:
+                logger.warning("Could not embed %s: %s", chart_file, e)
+
+    auto_column_width(ws)
+    logger.info("Created Historical sheet")
+
+
+
