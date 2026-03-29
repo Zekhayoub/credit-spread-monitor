@@ -341,5 +341,15 @@ def cooldown_sensitivity(
     return pd.DataFrame(records)
 
 
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    )
+    episodes, summary = run_all_stress_tests()
+    print(f"\nStress testing complete")
+    print(f"Total episodes: {len(episodes)}")
+    print(f"\nSummary:\n{summary.to_string()}")
 
+    
 
