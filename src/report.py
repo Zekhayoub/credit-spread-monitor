@@ -238,3 +238,123 @@ def create_history_sheet(ws, df: pd.DataFrame) -> None:
 
 
 
+def create_regime_sheet(
+    ws,
+    transition_matrix: pd.DataFrame,
+    regime_stats: pd.DataFrame,
+) -> None:
+    """
+    Create the Regime Analysis sheet — transition matrix and statistics.
+    """
+    # Title
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "Regime Analysis — Hidden Markov Model"
+    ws["A1"].font = Font(bold=True, size=12, color="2C3E50")
+
+    # Transition matrix
+    ws["A3"] = "Transition Probability Matrix"
+    ws["A3"].font = Font(bold=True, size=11)
+
+    # Headers
+    regimes = list(transition_matrix.columns)
+    write_header_row(ws, 4, ["From \\ To"] + regimes)
+
+    for i, (from_regime, row) in enumerate(transition_matrix.iterrows()):
+        ws.cell(row=5 + i, column=1, value=from_regime)
+        ws.cell(row=5 + i, column=1).font = Font(bold=True)
+        ws.cell(row=5 + i, column=1).border = THIN_BORDER
+        for j, to_regime in enumerate(regimes):
+            val = row[to_regime]
+            cell = ws.cell(row=5 + i, column=2 + j, value=round(val, 4))
+            cell.number_format = "0.00%"
+            cell.border = THIN_BORDER
+            # Color: darker for higher probability
+            if val > 0.8:
+                cell.fill = PatternFill("solid", fgColor="E74C3C")
+                cell.font = Font(color="FFFFFF")
+            elif val > 0.5:
+                cell.fill = PatternFill("solid", fgColor="F39C12")
+
+    # Regime stats
+    start_row = 5 + len(transition_matrix) + 2
+    ws.cell(row=start_row, column=1, value="Regime Statistics")
+    ws.cell(row=start_row, column=1).font = Font(bold=True, size=11)
+
+    stat_headers = list(regime_stats.columns)
+    write_header_row(ws, start_row + 1, stat_headers)
+
+    for i, (_, row) in enumerate(regime_stats.iterrows()):
+        for j, col in enumerate(stat_headers):
+            val = row[col]
+            if isinstance(val, float):
+                val = round(val, 4)
+            cell = ws.cell(row=start_row + 2 + i, column=1 + j, value=val)
+            cell.border = THIN_BORDER
+
+    auto_column_width(ws)
+    logger.info("Created Regime Analysis sheet")
+
+
+
+
+def create_stress_sheet(
+    ws,
+    stress_results: pd.DataFrame,
+    stress_confidence: pd.DataFrame | None = None,
+) -> None:
+    """
+    Create the Stress Testing sheet — results by scenario and horizon.
+    Includes max widening (the real risk metric) and confidence intervals.
+    """
+    # Title
+    ws.merge_cells("A1:H1")
+    ws["A1"] = "Historical Stress Testing Results"
+    ws["A1"].font = Font(bold=True, size=12, color="2C3E50")
+
+    ws["A2"] = "Max Widening is the primary risk metric — it captures intra-window extremes that trigger margin calls."
+    ws["A2"].font = Font(italic=True, size=9, color="7F8C8D")
+
+    # Results table
+    headers = list(stress_results.columns)
+    write_header_row(ws, 4, headers)
+
+    for i, (_, row) in enumerate(stress_results.iterrows()):
+        for j, col in enumerate(headers):
+            val = row[col]
+            if isinstance(val, float):
+                val = round(val, 4)
+            cell = ws.cell(row=5 + i, column=1 + j, value=val)
+            cell.border = THIN_BORDER
+
+            # Flag low sample sizes
+            if col == "n_episodes" and isinstance(val, (int, float)) and val < 10:
+                cell.fill = PatternFill("solid", fgColor="FDEBD0")
+                cell.font = Font(color="E67E22", italic=True)
+
+    # Confidence intervals (if available)
+    if stress_confidence is not None and not stress_confidence.empty:
+        ci_start = 5 + len(stress_results) + 2
+        ws.cell(row=ci_start, column=1, value="Bootstrap 95% Confidence Intervals (Max Widening)")
+        ws.cell(row=ci_start, column=1).font = Font(bold=True, size=11)
+
+        ci_headers = list(stress_confidence.columns)
+        write_header_row(ws, ci_start + 1, ci_headers)
+
+        for i, (_, row) in enumerate(stress_confidence.iterrows()):
+            for j, col in enumerate(ci_headers):
+                val = row[col]
+                if isinstance(val, float):
+                    val = round(val, 4)
+                cell = ws.cell(row=ci_start + 2 + i, column=1 + j, value=val)
+                cell.border = THIN_BORDER
+
+                # Highlight non-significant results
+                if col == "significant" and val is False:
+                    cell.fill = RED_FILL
+                    cell.font = RED_FONT
+
+    auto_column_width(ws)
+    logger.info("Created Stress Testing sheet")
+
+
+    
