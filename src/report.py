@@ -357,4 +357,95 @@ def create_stress_sheet(
     logger.info("Created Stress Testing sheet")
 
 
+def create_correlation_sheet(ws, df: pd.DataFrame) -> None:
+    """
+    Create the Correlations sheet — level and change correlations,
+    plus per-regime correlations if available.
+    """
+    # Title
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "Correlation Analysis"
+    ws["A1"].font = Font(bold=True, size=12, color="2C3E50")
+
+    spread_cols = [c for c in ["aaa_spread", "aa_spread", "bbb_spread", "hy_spread",
+                                "vix", "treasury_10y", "treasury_5y"]
+                   if c in df.columns]
+
+    # --- Level correlations ---
+    ws["A3"] = "Correlation — Spread Levels (full period)"
+    ws["A3"].font = Font(bold=True, size=11)
+
+    corr_levels = df[spread_cols].corr()
+    short_names = [c.replace("_spread", "").replace("treasury_", "T") for c in spread_cols]
+
+    write_header_row(ws, 4, [""] + short_names)
+    for i, (idx, row) in enumerate(corr_levels.iterrows()):
+        ws.cell(row=5 + i, column=1, value=short_names[i])
+        ws.cell(row=5 + i, column=1).font = Font(bold=True)
+        for j, val in enumerate(row):
+            cell = ws.cell(row=5 + i, column=2 + j, value=round(val, 3))
+            cell.border = THIN_BORDER
+            # Color by correlation strength
+            if abs(val) > 0.8 and i != j:
+                cell.fill = PatternFill("solid", fgColor="D5F5E3" if val > 0 else "FADBD8")
+
+    # --- Change correlations ---
+    change_cols = [f"{c}_change_1d" for c in ["aaa_spread", "aa_spread", "bbb_spread", "hy_spread"]
+                   if f"{c}_change_1d" in df.columns]
+
+    if change_cols:
+        offset = 5 + len(corr_levels) + 2
+        ws.cell(row=offset, column=1, value="Correlation — Daily Changes")
+        ws.cell(row=offset, column=1).font = Font(bold=True, size=11)
+
+        corr_changes = df[change_cols].corr()
+        short_change_names = [c.replace("_spread_change_1d", "") for c in change_cols]
+
+        write_header_row(ws, offset + 1, [""] + short_change_names)
+        for i, (idx, row) in enumerate(corr_changes.iterrows()):
+            ws.cell(row=offset + 2 + i, column=1, value=short_change_names[i])
+            ws.cell(row=offset + 2 + i, column=1).font = Font(bold=True)
+            for j, val in enumerate(row):
+                cell = ws.cell(row=offset + 2 + i, column=2 + j, value=round(val, 3))
+                cell.border = THIN_BORDER
+
+    # --- Per-regime correlations ---
+    if "regime" in df.columns:
+        regime_offset = offset + len(change_cols) + 4 if change_cols else 5 + len(corr_levels) + 4
+        ws.cell(row=regime_offset, column=1,
+                value="Correlation by Regime — Tail Dependence")
+        ws.cell(row=regime_offset, column=1).font = Font(bold=True, size=11)
+        ws.cell(row=regime_offset + 1, column=1,
+                value="Spreads become nearly perfectly correlated during crises.")
+        ws.cell(row=regime_offset + 1, column=1).font = Font(italic=True, size=9, color="7F8C8D")
+
+        regime_spread_cols = [c for c in ["aaa_spread", "aa_spread", "bbb_spread", "hy_spread"]
+                              if c in df.columns]
+        current_row = regime_offset + 3
+
+        for regime in sorted(df["regime"].unique()):
+            ws.cell(row=current_row, column=1, value=f"Regime: {regime}")
+            ws.cell(row=current_row, column=1).font = Font(bold=True)
+            n = (df["regime"] == regime).sum()
+            ws.cell(row=current_row, column=2, value=f"(n={n})")
+
+            regime_corr = df.loc[df["regime"] == regime, regime_spread_cols].corr()
+            short = [c.replace("_spread", "") for c in regime_spread_cols]
+
+            write_header_row(ws, current_row + 1, [""] + short)
+            for i, (idx, row) in enumerate(regime_corr.iterrows()):
+                ws.cell(row=current_row + 2 + i, column=1, value=short[i])
+                ws.cell(row=current_row + 2 + i, column=1).font = Font(bold=True)
+                for j, val in enumerate(row):
+                    cell = ws.cell(row=current_row + 2 + i, column=2 + j, value=round(val, 3))
+                    cell.border = THIN_BORDER
+
+            current_row += 2 + len(regime_corr) + 2
+
+    auto_column_width(ws)
+    logger.info("Created Correlations sheet")
+
+
+
+
     
